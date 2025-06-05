@@ -20,6 +20,11 @@ import matplotlib.pyplot as plt
 import numpy as np
 from sklearn.model_selection import train_test_split
 
+import matplotlib.pyplot as plt
+import numpy as np
+from scipy.stats import pearsonr
+import sys # For command-line arguments
+
 print("All modules installed and imported successfully!")
 
 
@@ -99,15 +104,15 @@ p_lifts_matrix = None
 
 # Define EEG window parameters relative to EACH kinematic point to be predicted
 # e.g., EEG window from 350ms before kin_point to 50ms before kin_point
-eeg_window_start_offset_sec = -0.5  # Start of EEG window relative to kin_point
-eeg_window_end_offset_sec = -0    # End of EEG window relative to kin_point
+eeg_window_start_offset_sec = -0.5 # Start of EEG window relative to kin_point
+eeg_window_end_offset_sec = 0    # End of EEG window relative to kin_point
 # eeg_window_step_samples = 10         # Step for sliding window / kinematic point sampling
 
 # Initialize lists to store the processed data
 eeg_data_new = []
 kin_data_new = [] # This will store individual kinematic points
 
-session_cumsum = 0 # Unused in final output, but kept as per request
+session_cumsum = 0 #
 
 # Iterate through each session using its global index
 # len(kin_data) is the total number of sessions
@@ -197,8 +202,6 @@ for global_session_idx in range(len(kin_data)):
                 eeg_window_end_global = global_kin_target_sample_in_fif + int(round(eeg_window_end_offset_sec * sfreq))
 
                 # 3. Extract the EEG segment
-                # As per request, no explicit boundary checks for EEG slicing here, relies on MNE handling or subsequent checks.
-                # However, it's good practice to ensure eeg_window_start_global < eeg_window_end_global and both are within eeg_raw_alldata bounds.
                 if eeg_window_start_global >= eeg_window_end_global:
                     # print(f"  Skipping due to invalid EEG window (start >= end) for P{participant_id}R{run_number}L{lift_number} at kin_idx {kin_target_idx_in_run}")
                     continue
@@ -228,16 +231,6 @@ print(f"\nProcessed {len(eeg_data_new)} EEG-Kinematic pairs.")
 
 # Now, eeg_data_new is a list of EEG segments (e.g., shape (channels, 150))
 # and kin_data_new is a list of corresponding single kinematic points (e.g., shape (3,) for wrist x,y,z)
-
-
-  
-# train_ratio = 0.8
-# validation_ratio = 0.1
-# test_ratio = 0.10
-
-# X_train, X_test, y_train, y_test = train_test_split(all_trials_eeg_segments, all_trials_kin_points, test_size=1 - train_ratio)
-
-# X_val, X_test, y_val, y_test = train_test_split(X_test, y_test, test_size=test_ratio/(test_ratio + validation_ratio)) 
 
 
 
@@ -286,11 +279,8 @@ print(f"  Length of X_test:  {len(X_test)}, y_test: {len(y_test)}")
 
 
   
+#Normalization 
 
-import numpy as np
-from sklearn.preprocessing import MinMaxScaler
-import torch # Added for PyTorch Tensors and DataLoaders
-from torch.utils.data import TensorDataset, DataLoader # Added for PyTorch
 
 
 # --- 1. Kinematic Data (y_train, y_val, y_test): MinMax Scaling ---
@@ -481,7 +471,6 @@ class PremovNet(nn.Module):
         x = x.permute(0, 2, 1)
 
         # LSTM Layer
-        # We only need the output of the last time step from the LSTM sequence output
         # lstm_out shape: (batch, timesteps, hidden_size)
         # hidden_state is tuple (h_n, c_n), where h_n is (num_layers, batch, hidden_size)
         lstm_out, (h_n, c_n) = self.lstm(x)
@@ -574,12 +563,23 @@ else:
 
 
 criterion = nn.MSELoss()
-optimizer = optim.AdamW(model.parameters(), lr=3e-4, weight_decay=5e-3)
+optimizer = optim.AdamW(model.parameters(), lr=3e-4, weight_decay=5e-2)
 print(input_dim)
 print(output_dim)
 
   
 
+
+import torch
+import torch.nn as nn
+import torch.optim as optim
+from torch.utils.data import DataLoader, TensorDataset
+import numpy as np
+import copy # Needed for saving best model state
+
+
+train_losses = []
+val_losses = []
 
 def train_one_epoch(model, train_loader, val_loader, criterion, optimizer, device, epoch, num_epochs):
     # --- Training Phase ---
@@ -614,21 +614,17 @@ def train_one_epoch(model, train_loader, val_loader, criterion, optimizer, devic
             batch_X_val, batch_y_val = batch_X_val.to(device), batch_y_val.to(device)
             val_output = model(batch_X_val)
             val_loss = criterion(val_output, batch_y_val)
-
+            
             if torch.isnan(val_loss).any() or torch.isinf(val_loss).any():
                  print(f"  WARNING: Invalid loss detected during VALIDATION! Epoch {epoch+1}. Skipping batch.")
                  continue # Skip accumulating invalid loss
 
             total_val_loss += val_loss.item()
-            val_batches += 1
+            val_batches +=  1
 
     # Avoid division by zero if val_loader is empty or all batches had NaN loss
     avg_val_loss = total_val_loss / val_batches if val_batches > 0 else None
 
-    # Handle cases where loss calculation failed entirely for a phase
-    if avg_train_loss is None or avg_val_loss is None:
-         print(f"  ERROR: Could not calculate valid average loss for Epoch {epoch+1}. Train: {avg_train_loss}, Val: {avg_val_loss}")
-         return None, None # Indicate failure
 
     return avg_train_loss, avg_val_loss
 
@@ -638,8 +634,7 @@ def train_one_epoch(model, train_loader, val_loader, criterion, optimizer, devic
 
 
 # --- Early Stopping Parameters ---
-patience = 5  # How many epochs to wait after last improvement
-
+patience = 10  # How many epochs to wait after last improvement
 best_val_loss = np.inf # Initialize best validation loss to infinity
 epochs_no_improve = 0  # Counter for epochs without improvement
 best_model_state = None # To store the state_dict of the best model
@@ -654,6 +649,9 @@ for epoch in range(num_epochs):
     avg_train_loss, avg_val_loss = train_one_epoch(
         model, train_loader, val_loader, criterion, optimizer, device, epoch, num_epochs
     )
+    
+    train_losses.append(avg_train_loss)
+    val_losses.append(avg_val_loss)
 
     # Check if training/validation failed for this epoch
     if avg_train_loss is None or avg_val_loss is None:
@@ -672,7 +670,6 @@ for epoch in range(num_epochs):
         print(f"  Validation loss improved. Saving model state at epoch {epoch+1}")
     else:
         epochs_no_improve += 1
-        # best_model_state = copy.deepcopy(model.state_dict()) # Make a deep copy
 
         print(f"  Validation loss did not improve for {epochs_no_improve} epoch(s).")
 
@@ -691,16 +688,43 @@ if best_model_state is not None:
     # Optional: Save the best model state to file
     save_path = f"best_{type(model).__name__}_wrist_state.pth" # Example filename for wrist model
     torch.save(best_model_state, save_path)
-    # print(f"Best model state saved to {save_path}")
+    print(f"Best model state saved to {save_path}")
 else:
     print("Warning: No best model state was saved (perhaps training stopped early or validation loss never improved).")
+
+epochs_range = range(1, len(train_losses) + 1)
+
+plt.figure(figsize=(14, 5))
+
+plt.subplot(1, 2, 1)
+plt.plot(epochs_range, train_losses, label='Training Loss')
+plt.plot(epochs_range, val_losses, label='Validation Loss')
+plt.title('Training and Validation Loss')
+plt.xlabel('Epochs')
+plt.ylabel('Loss')
+plt.legend()
+plt.grid(True)
+
+folder_name=f"shift_{eeg_window_step_samples}_time_plot_{eeg_window_start_offset_sec*-1*1000}ms_window"
+os.makedirs(folder_name, exist_ok=True)
+
+file_name = f"participants_{participant_arg}_shift_{eeg_window_step_samples}_training_validation_loss_{eeg_window_start_offset_sec*-1*1000}ms_window.png"
+save_path = os.path.join(folder_name, file_name)
+
+try:
+    plt.savefig(save_path, dpi=300, bbox_inches='tight')
+    print(f"\nPlot saved as {file_name}")
+except Exception as e_save:
+    print(f"Error saving plot: {e_save}")
+
+
+
+
+
 
 # --- Model with best weights is ready ---
 # You can now use 'model' (which now holds the best wrist weights) for testing or prediction
 
-# model.load_state_dict(torch.load("best_PremovNet_wrist_state.pth", weights_only=True))
-
-  
 print("Starting prediction phase for Wrist model...")
 model.eval()  # Set the wrist model to evaluation mode
 
@@ -809,13 +833,19 @@ for i, dim_name in enumerate(dimensions):
 
 # --- Configuration ---
 num_sequences_to_plot = 1 # Plot the first N sequences.
-# Set a limit for timesteps to plot. Set to None or a large number to plot all.
-max_timesteps_to_plot = 200
+# Set a limit for time to plot in seconds. Set to None to plot the entire duration.
+max_time_to_plot_seconds = 5 # Example: Plot up to 10.0 seconds. None to plot all.
 
- # Example: Plot only the first 100 timesteps. None to plot all.
+plot_main_title_base = f"Wrist Kinematics: Predicted vs. Ground Truth ({eeg_window_start_offset_sec*-1*1000}ms Windows - {(eeg_window_step_samples/500)*1000}ms Step Size)"
 
-plot_main_title_base = "Wrist Kinematics: Predicted vs. Ground Truth"
+# --- Define Sampling Rate and ASSUME Window Step is pre-defined ---
+sampling_rate_hz = 500  # EEG sampling rate in Hz
 
+
+time_per_timestep = eeg_window_step_samples / sampling_rate_hz
+if time_per_timestep <= 0:
+    raise ValueError("Calculated 'time_per_timestep' must be positive. "
+                     "Check 'eeg_window_step_samples' and 'sampling_rate_hz'.")
 
 
 # --- PCC Calculation ---
@@ -826,15 +856,14 @@ avg_pcc_text = "Average PCC: N/A"
 if 'final_wrist_predictions' in locals() and 'final_wrist_targets' in locals() and \
    isinstance(final_wrist_predictions, np.ndarray) and isinstance(final_wrist_targets, np.ndarray):
 
-    # Ensure data is at least 2D for PCC calculation
     temp_preds_for_pcc = final_wrist_predictions
     temp_targets_for_pcc = final_wrist_targets
 
-    if temp_preds_for_pcc.ndim == 3: # (sequences, timesteps, features)
+    if temp_preds_for_pcc.ndim == 3:
         num_features_pcc = temp_preds_for_pcc.shape[2]
         predictions_flat = temp_preds_for_pcc.reshape(-1, num_features_pcc)
         targets_flat = temp_targets_for_pcc.reshape(-1, num_features_pcc)
-    elif temp_preds_for_pcc.ndim == 2: # (timesteps, features) - single sequence
+    elif temp_preds_for_pcc.ndim == 2:
         num_features_pcc = temp_preds_for_pcc.shape[1]
         predictions_flat = temp_preds_for_pcc
         targets_flat = temp_targets_for_pcc
@@ -843,42 +872,43 @@ if 'final_wrist_predictions' in locals() and 'final_wrist_targets' in locals() a
         predictions_flat, targets_flat = None, None
 
     if predictions_flat is not None and targets_flat is not None and predictions_flat.shape == targets_flat.shape:
-        print(f"Reshaped arrays for PCC to: {predictions_flat.shape}")
-        pcc_results = {}
-        dimensions = ['X', 'Y', 'Z'] + [f"Feature {i+1}" for i in range(3, num_features_pcc)]
+        if predictions_flat.shape[0] == 0: # No data to process
+            pcc_results_text_lines.append("PCC calculation skipped: No data points.")
+        else:
+            print(f"Reshaped arrays for PCC to: {predictions_flat.shape}")
+            pcc_results = {}
+            dimensions = ['X', 'Y', 'Z'] + [f"Feature {i+1}" for i in range(3, num_features_pcc)]
 
-        for i in range(num_features_pcc):
-            dim_name = dimensions[i] if i < len(dimensions) else f"Feature {i+1}"
-            pred_dim = predictions_flat[:, i]
-            target_dim = targets_flat[:, i]
+            for i in range(num_features_pcc):
+                dim_name = dimensions[i] if i < len(dimensions) else f"Feature {i+1}"
+                pred_dim = predictions_flat[:, i]
+                target_dim = targets_flat[:, i]
 
-            if np.std(pred_dim) < 1e-9 or np.std(target_dim) < 1e-9: # More robust check for constant
-                print(f"  Skipping PCC for {dim_name}-dimension: Data is effectively constant.")
-                pcc_results[dim_name] = (np.nan, np.nan)
-            else:
-                try:
-                    corr, p_value = pearsonr(pred_dim, target_dim)
-                    pcc_results[dim_name] = (corr, p_value)
-                    pcc_results_text_lines.append(f"PCC ({dim_name}): {corr:.3f} (p={p_value:.2e})")
-                except ValueError as e:
-                    print(f"  Error calculating PCC for {dim_name}-dimension: {e}")
+                if np.std(pred_dim) < 1e-9 or np.std(target_dim) < 1e-9:
+                    print(f"   Skipping PCC for {dim_name}-dimension: Data is effectively constant.")
                     pcc_results[dim_name] = (np.nan, np.nan)
-        
-        valid_corrs = [r[0] for r in pcc_results.values() if not np.isnan(r[0])]
-        if valid_corrs:
-            avg_pcc = np.mean(valid_corrs)
-            avg_pcc_text = f"Average PCC: {avg_pcc:.3f}"
-        pcc_results_text_lines.append(avg_pcc_text)
+                else:
+                    try:
+                        corr, p_value = pearsonr(pred_dim, target_dim)
+                        pcc_results[dim_name] = (corr, p_value)
+                        pcc_results_text_lines.append(f"PCC ({dim_name}): {corr:.3f} (p={p_value:.2e})")
+                    except ValueError as e:
+                        print(f"   Error calculating PCC for {dim_name}-dimension: {e}")
+                        pcc_results[dim_name] = (np.nan, np.nan)
 
+            valid_corrs = [r[0] for r in pcc_results.values() if not np.isnan(r[0])]
+            if valid_corrs:
+                avg_pcc = np.mean(valid_corrs)
+                avg_pcc_text = f"Average PCC: {avg_pcc:.3f}"
+            pcc_results_text_lines.append(avg_pcc_text)
     else:
-        pcc_results_text_lines.append("PCC calculation skipped due to data issues.")
+        pcc_results_text_lines.append("PCC calculation skipped due to data shape issues or missing data.")
 else:
-    pcc_results_text_lines.append("PCC not calculated: prediction/target data missing.")
+    pcc_results_text_lines.append("PCC not calculated: prediction/target data missing or not ndarray.")
 
 # --- Plotting ---
 print(f"\nPreparing to plot...")
 try:
-    # Ensure data for plotting is NumPy array
     if not isinstance(final_wrist_predictions, np.ndarray):
         final_wrist_predictions = np.array(final_wrist_predictions)
     if 'final_wrist_targets' in locals() and not isinstance(final_wrist_targets, np.ndarray):
@@ -899,97 +929,128 @@ try:
         raise ValueError(f"Shape mismatch for plotting. Pred: {final_wrist_predictions.shape}, Target: {final_wrist_targets.shape}")
 
     actual_num_sequences_in_data = final_wrist_predictions.shape[0]
-    original_sequence_length = final_wrist_predictions.shape[1]
+    original_sequence_length_timesteps = final_wrist_predictions.shape[1]
     num_features_plot = final_wrist_predictions.shape[2]
 
     current_num_sequences_to_plot = min(num_sequences_to_plot, actual_num_sequences_in_data)
+
     if current_num_sequences_to_plot <= 0:
         print("No sequences to plot. Exiting.")
+    elif original_sequence_length_timesteps == 0:
+        print("Data contains 0 timesteps. Nothing to plot.")
     else:
+
         plot_dimension_labels = ['X', 'Y', 'Z'] + [f"Feat {i+1}" for i in range(3, num_features_plot)]
-        
-        current_sequence_length_to_plot = original_sequence_length
+
+        # Determine the number of timesteps to plot based on max_time_to_plot_seconds
+        timesteps_to_plot_limit = original_sequence_length_timesteps # Default to all
+        if max_time_to_plot_seconds is not None:
+            if max_time_to_plot_seconds < 0:
+                 print("Warning: 'max_time_to_plot_seconds' is negative. Plotting entire duration.")
+            else:
+                # Calculate timesteps corresponding to the time limit
+                # Using ceil to include the full timestep interval that max_time_to_plot_seconds falls into
+                timesteps_requested_by_time_limit = int(np.ceil(max_time_to_plot_seconds / time_per_timestep))
+                timesteps_to_plot_limit = min(original_sequence_length_timesteps, timesteps_requested_by_time_limit)
+
+        current_sequence_length_to_plot_timesteps = timesteps_to_plot_limit
+        if current_sequence_length_to_plot_timesteps <= 0 and max_time_to_plot_seconds is not None and max_time_to_plot_seconds > 0 :
+            print(f"Warning: max_time_to_plot_seconds ({max_time_to_plot_seconds}s) is shorter than one timestep ({time_per_timestep}s). Effective timesteps to plot is 0 or 1.")
+            if current_sequence_length_to_plot_timesteps == 0 and original_sequence_length_timesteps > 0 : # Ensure at least one if possible
+                 current_sequence_length_to_plot_timesteps = 1 # Plot at least the first timestep if data exists
+        elif current_sequence_length_to_plot_timesteps == 0 and original_sequence_length_timesteps > 0:
+             print("Warning: Calculated timesteps to plot is 0, but data exists. Plotting first timestep.")
+             current_sequence_length_to_plot_timesteps = 1
+
+
+        actual_plotted_duration_seconds = current_sequence_length_to_plot_timesteps * time_per_timestep
         plot_title_suffix = ""
-        if max_timesteps_to_plot is not None and max_timesteps_to_plot < original_sequence_length:
-            current_sequence_length_to_plot = max_timesteps_to_plot
-            plot_title_suffix = f" (First {current_sequence_length_to_plot} Timesteps)"
-            print(f"Plotting first {current_sequence_length_to_plot} of {original_sequence_length} timesteps.")
+
+        if max_time_to_plot_seconds is not None and max_time_to_plot_seconds >= 0:
+            if current_sequence_length_to_plot_timesteps < original_sequence_length_timesteps:
+                plot_title_suffix = f" (First {actual_plotted_duration_seconds:.2f}s / {current_sequence_length_to_plot_timesteps} Timesteps)"
+                print(f"Plotting first {actual_plotted_duration_seconds:.2f}s ({current_sequence_length_to_plot_timesteps} of {original_sequence_length_timesteps} timesteps) due to time limit of {max_time_to_plot_seconds}s.")
+            else: # Time limit was set but it was >= data duration or resulted in full plot
+                plot_title_suffix = f" (Full {actual_plotted_duration_seconds:.2f}s / {current_sequence_length_to_plot_timesteps} Timesteps)"
+                print(f"Plotting all {current_sequence_length_to_plot_timesteps} timesteps (total duration {actual_plotted_duration_seconds:.2f}s). Requested time limit was {max_time_to_plot_seconds}s.")
+        else: # No time limit or negative time limit (interpreted as plot all)
+            plot_title_suffix = f" (Full {actual_plotted_duration_seconds:.2f}s / {current_sequence_length_to_plot_timesteps} Timesteps)"
+            print(f"Plotting all {current_sequence_length_to_plot_timesteps} timesteps (total duration {actual_plotted_duration_seconds:.2f}s).")
+
+        if current_sequence_length_to_plot_timesteps == 0:
+            print("Final number of timesteps to plot is zero. No plot will be generated.")
         else:
-            print(f"Plotting all {original_sequence_length} timesteps.")
+            num_plot_rows = current_num_sequences_to_plot * num_features_plot
+            fig_width = 10
+            fig_height_per_feature = 2.5
+            fig_height = fig_height_per_feature * num_plot_rows + 1.5
 
-        num_plot_rows = current_num_sequences_to_plot * num_features_plot
-        fig_width = 10 
-        fig_height_per_feature = 2.5
-        fig_height = fig_height_per_feature * num_plot_rows + 1.5 # +1.5 for title, legend, PCC text
+            plt.style.use('seaborn-v0_8-whitegrid')
+            fig, axes = plt.subplots(num_plot_rows, 1, figsize=(fig_width, fig_height), sharex=True, squeeze=False)
 
-        plt.style.use('seaborn-v0_8-whitegrid')
-        fig, axes = plt.subplots(num_plot_rows, 1, figsize=(fig_width, fig_height), sharex=True, squeeze=False)
-        
-        main_title = plot_main_title_base + plot_title_suffix
-        fig.suptitle(main_title, fontsize=16, y=0.98 if num_plot_rows > 1 else 0.96)
+            main_title = plot_main_title_base + plot_title_suffix
+            fig.suptitle(main_title, fontsize=16, y=0.98 if num_plot_rows > 1 else 0.96)
 
-        time_axis = np.arange(current_sequence_length_to_plot)
-        plot_idx_counter = 0
+            time_axis_seconds = np.arange(current_sequence_length_to_plot_timesteps) * time_per_timestep
+            plot_idx_counter = 0
 
-        for seq_iter_idx in range(current_num_sequences_to_plot):
-            seq_preds = final_wrist_predictions[seq_iter_idx, :current_sequence_length_to_plot, :]
-            seq_targets = final_wrist_targets[seq_iter_idx, :current_sequence_length_to_plot, :]
+            for seq_iter_idx in range(current_num_sequences_to_plot):
+                seq_preds = final_wrist_predictions[seq_iter_idx, :current_sequence_length_to_plot_timesteps, :]
+                seq_targets = final_wrist_targets[seq_iter_idx, :current_sequence_length_to_plot_timesteps, :]
 
-            for feat_idx in range(num_features_plot):
-                ax = axes[plot_idx_counter, 0]
-                dim_label = plot_dimension_labels[feat_idx] if feat_idx < len(plot_dimension_labels) else f"Feat {feat_idx+1}"
+                for feat_idx in range(num_features_plot):
+                    ax = axes[plot_idx_counter, 0]
+                    dim_label = plot_dimension_labels[feat_idx] if feat_idx < len(plot_dimension_labels) else f"Feat {feat_idx+1}"
+
+                    ax.plot(time_axis_seconds, seq_targets[:, feat_idx], label='Ground Truth', color='black', linewidth=1.2, alpha=0.7)
+                    ax.plot(time_axis_seconds, seq_preds[:, feat_idx], label='Predicted', color='red', linestyle='--', linewidth=1.2, alpha=0.7)
+                    ax.tick_params(axis='both', which='major', labelsize=8)
+                    ax.grid(True, linestyle=':', alpha=0.6)
+
+                    combined_data = np.concatenate((seq_targets[:, feat_idx], seq_preds[:, feat_idx]))
+                    y_min, y_max = np.min(combined_data), np.max(combined_data)
+                    padding = (y_max - y_min) * 0.1 if (y_max - y_min) > 1e-6 else 0.1
+                    ax.set_ylim(y_min - padding, y_max + padding)
+
+                    title_prefix = f"Seq {seq_iter_idx}: " if current_num_sequences_to_plot > 1 else ""
+                    ax.set_title(f"{title_prefix}{dim_label} Trajectory", fontsize=10)
+                    ax.set_ylabel("Value", fontsize=9)
+
+                    if plot_idx_counter == 0: handles, labels = ax.get_legend_handles_labels()
+                    plot_idx_counter += 1
+
+            if plot_idx_counter > 0:
+                axes[plot_idx_counter-1, 0].set_xlabel("Time (seconds)", fontsize=9)
+
+            if 'handles' in locals():
+                fig.legend(handles, labels, loc='upper center', ncol=2, bbox_to_anchor=(0.5, 0.95 if num_plot_rows > 1 else 0.90), fontsize=9)
+
+            pcc_full_text = "PCC Results:\n" + "\n".join(pcc_results_text_lines)
+            fig.text(0.5, 0.01, pcc_full_text, ha='center', va='bottom', fontsize=8,
+                     bbox=dict(boxstyle='round,pad=0.5', fc='wheat', alpha=0.5))
+
+            plt.tight_layout(rect=[0, 0.05, 1, 0.93 if num_plot_rows > 1 else 0.88])
+
+            file_name = f"participants_{participant_arg}_shift_{eeg_window_step_samples}_time_plot_{eeg_window_start_offset_sec*-1*1000}ms_window.png"
+            try:
+                save_path = os.path.join(folder_name, file_name)
+                fig.savefig(save_path, dpi=300, bbox_inches='tight')
                 
-                ax.plot(time_axis, seq_targets[:, feat_idx], label='Ground Truth', color='black', linewidth=1.2, alpha=0.7)
-                ax.plot(time_axis, seq_preds[:, feat_idx], label='Predicted', color='red', linestyle='--', linewidth=1.2, alpha=0.7)
-                ax.tick_params(axis='both', which='major', labelsize=8)
-                ax.grid(True, linestyle=':', alpha=0.6)
+                print(f"\nPlot saved as {save_path}")
+            except Exception as e_save:
+                print(f"Error saving plot: {e_save}")
 
-                combined_data = np.concatenate((seq_targets[:, feat_idx], seq_preds[:, feat_idx]))
-                y_min, y_max = np.min(combined_data), np.max(combined_data)
-                padding = (y_max - y_min) * 0.1 if (y_max - y_min) > 1e-6 else 0.1
-                ax.set_ylim(y_min - padding, y_max + padding)
-
-                title_prefix = f"Seq {seq_iter_idx}: " if current_num_sequences_to_plot > 1 else ""
-                ax.set_title(f"{title_prefix}{dim_label} Trajectory", fontsize=10)
-                ax.set_ylabel("Value", fontsize=9)
-                
-                if plot_idx_counter == 0: handles, labels = ax.get_legend_handles_labels()
-                plot_idx_counter += 1
-        
-        if plot_idx_counter > 0: # Ensure x-label is only on the last actual plot
-             axes[plot_idx_counter-1, 0].set_xlabel("Timestep", fontsize=9)
-
-        if 'handles' in locals():
-            fig.legend(handles, labels, loc='upper center', ncol=2, bbox_to_anchor=(0.5, 0.95 if num_plot_rows > 1 else 0.90), fontsize=9)
-
-        # Add PCC text at the bottom
-        pcc_full_text = "PCC Results:\n" + "\n".join(pcc_results_text_lines)
-        fig.text(0.5, 0.01, pcc_full_text, ha='center', va='bottom', fontsize=8, 
-                 bbox=dict(boxstyle='round,pad=0.5', fc='wheat', alpha=0.5))
-
-        plt.tight_layout(rect=[0, 0.05, 1, 0.93 if num_plot_rows > 1 else 0.88]) # Adjust rect for suptitle, legend, and PCC
-
-        # --- Save Figure ---
-        save_filename = f"participants_{participant_arg}_shift_{eeg_window_step_samples}.png"
-        try:
-            fig.savefig(save_filename, dpi=300, bbox_inches='tight')
-            print(f"\nPlot saved as {save_filename}")
-        except Exception as e_save:
-            print(f"Error saving plot: {e_save}")
-
-        plt.show()
-        print("Plot generation complete.")
+            plt.show()
+            print("Plot generation complete.")
 
 except ValueError as ve:
     print(f"\n--- ERROR: Input Data Issue ---")
     print(f"Details: {ve}")
+except NameError as ne:
+    print(f"\n--- ERROR: Configuration Issue ---")
+    print(f"Details: {ne}")
 except Exception as e:
     print(f"\n--- ERROR during plotting ---")
     print(f"An unexpected error occurred: {e}")
-
-
-
-  
-
-
-  
+    import traceback
+    traceback.print_exc()
