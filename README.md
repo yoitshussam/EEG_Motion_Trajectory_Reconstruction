@@ -1,22 +1,20 @@
-## Hand Kinematic Reconstruction using EEG signals (WAY-EEG-GAL DATASET)
-### -import_preprocess.py
-contains the code for importing all the eeg and kinematic data as well as applying ICA to them and outputting a file in raw MNE .fif format    
-The code assumes that you have downloaded the dataset and extracted the HS_P1_S1.mat—HS_P12_S9.mat (108 files) into a single folder  
-Each file contains all data in a single lifting series, in continuous format
+# Hand Kinematic Reconstruction using EEG signals
+ Used Datasets: [WAY-EEG-GAL](https://springernature.figshare.com/collections/WAY_EEG_GAL_Multi_channel_EEG_Recordings_During_3_936_Grasp_and_Lift_Trials_with_Varying_Weight_and_Friction/988376), and [FULL BODY IN UNCONSTRAINED MOTION](https://figshare.com/articles/dataset/EEG_Data/5616109?backTo=/collections/Full_body_mobile_brain-body_imaging_data_during_unconstrained_locomotion_on_stairs_ramps_and_level_ground/3934264)
 
+Used Models: CNN+LSTM, cGAN, CAE
+## Structure of project:
+WAY-EEG-GAL folder:
+- import.ipynb \
+The code blocks in this file are for importing the EEG and kinematic files, as well as filtering and applying ICA to the EEG
 
-https://drive.google.com/file/d/115VUReHSuEn-ICRZ9759aiiCBjQZ-PGq/view?usp=sharing
-https://drive.google.com/file/d/1V4ZKLZhdnnM4GoHeaTfmDDRBe5TErqrO/view?usp=sharing
+- CNN+LSTM_training.py
+- GAN_training.py
+- CAE_training.py
+These are the training scripts for each different model. They handle normalization as well as windowing, training, and plotting. They are largely the same with the difference being the models and the training loop. 
+It's possible to merge them all together and have the models in a seperate file to import as a class
 
-these are the cleaned EEG.fif and kin_data.npy files so you don't have to download the entire dataset to import and preprocess
-### -training_and_plot.py 
-contains everything else. First it loads the cleaned EEG file as well as the kinematic data and performs a sliding windowing process with a specified lag. Afterwards the training, validation, testing split is done  
-and the Normalization is performed and then the data is turned into Tensors and Dataloaders for PyTorch. Finally the training of the model, and the plotting of the results with the PCC score  
-command line arguments are:   
-
-#1: participant number  
-#2: sliding window shift sample size  
-#3: model architecture (1) PreMovNet CNNLSTM, and (2) 2D CNN   
-
-so .\training_and_plot.py 3 10 1 would mean participant #3 shift of 10 samples, and PreMovNet model
+\
+FULL BODY folder:
+- import.ipynb
+The code blocks in this file handle importing the EEG, EOG, and kinematic data. As well as upsampling the kinematic data to match the EEG
 
