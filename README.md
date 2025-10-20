@@ -12,6 +12,7 @@ Each folder has
 -HS_P1_S1.mat—HS_P12_S9.mat and
 -WS_P1_S1.mat—WS_P12_S9.mat files
 they are the same data but HS is given in the format we want (continuous). We also need the AllLifts files which we use to seperate individual trials and extract only the motion events without the rest inbetween.
+Run the script in the same directory as the folders of dataset.
 
 - CNN+LSTM_training.py
 - GAN_training.py
@@ -20,7 +21,12 @@ These are the training scripts for each different model. They handle normalizati
 It's possible to merge them all together and have the models in a seperate file to import as a class
 
 \
+
 FULL BODY folder:
 - import.ipynb
-The code blocks in this file handle importing the EEG, EOG, and kinematic data. As well as upsampling the kinematic data to match the EEG
+The code blocks in this file handle importing the EEG, EOG, and kinematic data. As well as upsampling the kinematic data to match the EEG.
+To run the script, download the dataset and extract it into 'data' folder into the same directory and run. 
 
+- fullbody_CNN+LSTM_training.py
+- fullbody_GAN_training.py
+- fullbody_CAE_training.py
