@@ -1,32 +1,169 @@
-# Hand Kinematic Reconstruction using EEG signals
- Used Datasets: [WAY-EEG-GAL](https://springernature.figshare.com/collections/WAY_EEG_GAL_Multi_channel_EEG_Recordings_During_3_936_Grasp_and_Lift_Trials_with_Varying_Weight_and_Friction/988376), and [FULL BODY IN UNCONSTRAINED MOTION](https://figshare.com/articles/dataset/EEG_Data/5616109?backTo=/collections/Full_body_mobile_brain-body_imaging_data_during_unconstrained_locomotion_on_stairs_ramps_and_level_ground/3934264)
+# Motion Trajectory Reconstruction from EEG
 
-Used Models: CNN+LSTM, cGAN, CAE
+This repository contains the code accompanying our work on **decoding continuous movement trajectories from non-invasive EEG** using deep learning.
 
-## The scripts of each dataset:
-WAY-EEG-GAL folder:
-- import.ipynb \
-The code blocks in this file are for importing the EEG and kinematic files, as well as filtering and applying ICA to the EEG.
-To run the data processing script, download the original dataset which is seperated into 12 folders P1,P2, etc. for each participant.
-Each folder has
--HS_P1_S1.mat—HS_P12_S9.mat and
--WS_P1_S1.mat—WS_P12_S9.mat files
-they are the same data but HS is given in the format we want (continuous). We also need the AllLifts files which we use to seperate individual trials and extract only the motion events without the rest inbetween.
-Run the script in the same directory as the folders of dataset.
+We implement and compare three architectures for **EEG → 3D kinematics** regression / translation:
 
-- CNN+LSTM_training.py
-- GAN_training.py
-- CAE_training.py
-These are the training scripts for each different model. They handle normalization as well as windowing, training, and plotting. They are largely the same with the difference being the models and the training loop. 
-It's possible to merge them all together and have the models in a seperate file to import as a class
+- **CNN + LSTM** (hybrid spatio-temporal baseline inspired by PreMovNet)
+- **Modified Pix2Pix cGAN** adapted from image-to-image translation to **signal-to-signal** translation using **1D convolutions**
+- **Convolutional Autoencoder (CAE)** for sequence reconstruction / regression
 
-\
+The models are evaluated on two datasets representing different levels of movement complexity:
 
-FULL BODY folder:
-- import.ipynb
-The code blocks in this file handle importing the EEG, EOG, and kinematic data. As well as upsampling the kinematic data to match the EEG.
-To run the script, download the dataset and extract it into 'data' folder into the same directory and run. 
+1. **WAY-EEG-GAL** (grasp-and-lift; constrained upper-limb movement)
+2. **Full body in unconstrained motion** (locomotion across multiple modes; increased DoF + motion artifacts)
 
-- fullbody_CNN+LSTM_training.py
-- fullbody_GAN_training.py
-- fullbody_CAE_training.py
+We report decoding quality using the **Pearson Correlation Coefficient (PCC)** between predicted and ground-truth trajectories.
+
+---
+
+## Why this project
+
+Most publicly available EEG-BCI work focuses on **motor imagery** and yields **discrete class predictions**. However, real assistive devices (prosthetics, exoskeletons) require **continuous control signals**.
+
+This project explores whether deep learning models can learn a mapping from EEG to continuous kinematics, and what breaks when moving from constrained lab tasks to realistic locomotion.
+
+---
+
+## Key findings
+
+- On **WAY-EEG-GAL**, all models can reconstruct motion trajectories well; the cGAN performs slightly better overall (often **PCC > 0.70**).
+- On **unconstrained locomotion**, performance drops substantially (**PCC < 0.45** on average), likely due to motion artifacts + increased degrees of freedom.
+
+---
+
+## Repository structure
+
+- `WAY-EEG-GAL/`
+  - `import.ipynb` – Import + preprocessing + export to NumPy
+  - `CNN+LSTM_training.py` – Train/evaluate CNN+LSTM on WAY-EEG-GAL
+  - `GAN_training.py` – Train/evaluate modified Pix2Pix cGAN on WAY-EEG-GAL
+  - `CAE_training.py` – Train/evaluate CAE on WAY-EEG-GAL
+
+- `FULL BODY/`
+  - `import.ipynb` – Import + preprocessing + kinematics upsampling + export
+  - `fullbody_CNN+LSTM_training.py`
+  - `fullbody_GAN_training.py`
+  - `fullbody_CAE_training.py`
+
+---
+
+## Datasets
+
+### 1) WAY-EEG-GAL
+
+- 12 participants
+- 32-channel EEG
+- EEG + kinematics sampled at **500 Hz**
+- Task: reach → grasp → lift/hold → place → release → return to rest
+
+We use the **3D position of the wrist point** (X, Y, Z) as the decoding target.
+
+**Download:** WAY-EEG-GAL collection (see link in the original README).
+
+### 2) Full body in unconstrained motion
+
+- 10 participants (note: in our experiments, participant #1 files appeared corrupted and were excluded)
+- 64-channel EEG sampled at **1000 Hz**
+- Full-body motion capture using IMUs (typically **30 Hz**, sometimes 60 Hz)
+- Locomotion modes: level walking, stair ascent/descent, ramp ascent/descent
+
+---
+
+## Preprocessing
+
+We use **MNE-Python** for EEG preprocessing.
+
+### EEG
+
+- Band-pass filtering (we experimented with multiple ranges; **0.5–40 Hz** performed best in our runs)
+- Common average re-referencing (CAR)
+- ICA (tested for artifact removal, but often decreased PCC in our experiments, so it is typically disabled)
+- Channel selection (for WAY-EEG-GAL we follow the channel subset used in the referenced work)
+
+### Kinematics
+
+- Normalization handled in training scripts
+- Windowing / segmentation handled in training scripts
+- For full-body dataset: we upsample kinematics to match EEG sampling rate when using the cGAN / autoencoder-style models
+
+---
+
+## Windowing setup
+
+Across experiments we found the following worked best and used it consistently:
+
+- **EEG window size:** 500 ms
+- **Step size:** 250 ms (50% overlap)
+
+---
+
+## How to run
+
+> Notes:
+> - The code was developed as research code; paths and assumptions may need minor adjustments depending on where you place the datasets.
+> - The import notebooks save intermediate outputs as `.npy` files to avoid repeatedly parsing large `.mat` files.
+
+### WAY-EEG-GAL
+
+1. Download the dataset and extract it into participant folders (`P1`, `P2`, …).
+2. Place the notebook `WAY-EEG-GAL/import.ipynb` in the same directory level as those participant folders.
+3. Run the notebook to export preprocessed EEG + kinematics arrays to `.npy`.
+4. Run one of:
+   - `WAY-EEG-GAL/CNN+LSTM_training.py`
+   - `WAY-EEG-GAL/GAN_training.py`
+   - `WAY-EEG-GAL/CAE_training.py`
+
+### Full body
+
+1. Download the dataset and place it under `FULL BODY/data/`.
+2. Run `FULL BODY/import.ipynb` to export `.npy` files (and upsample kinematics if using that approach).
+3. Run one of:
+   - `FULL BODY/fullbody_CNN+LSTM_training.py`
+   - `FULL BODY/fullbody_GAN_training.py`
+   - `FULL BODY/fullbody_CAE_training.py`
+
+---
+
+## Metrics
+
+We evaluate reconstruction using **Pearson Correlation Coefficient (PCC)** between predicted and ground-truth kinematics (per axis where applicable).
+
+---
+
+## References
+
+The following are key references behind the approaches used in this repo:
+
+- **Transformer-based motion trajectory reconstruction:**
+  - P. Wang et al., “MTRT: Motion Trajectory Reconstruction Transformer for EEG-Based BCI Decoding,” *IEEE Transactions on Neural Systems and Rehabilitation Engineering*, 2023. doi: 10.1109/TNSRE.2023.3275172.
+
+- **CNN+LSTM baseline / premovement decoding on WAY-EEG-GAL:**
+  - S. Pancholi et al., “Source Aware Deep Learning Framework for Hand Kinematic Reconstruction Using EEG Signal,” *IEEE Transactions on Cybernetics*, 2023. doi: 10.1109/TCYB.2022.3166604.
+  - A. Jain and L. Kumar, “PreMovNet: Premovement EEG-Based Hand Kinematics Estimation for Grasp-and-Lift Task,” *IEEE Sensors Letters*, 2022. doi: 10.1109/LSENS.2022.3183284.
+
+- **Signal-to-signal translation inspiration for adapting Pix2Pix to 1D:**
+  - “Signal to Signal Translation,” *arXiv preprint*, 2024. doi: 10.48550/arXiv.2403.04800.
+
+- **CAE inspiration (biosignal → biosignal transformation):**
+  - M. Haescher et al., “Transforming Seismocardiograms Into Electrocardiograms by Applying Convolutional Autoencoders,” *ICASSP 2020*, 2020. doi: 10.1109/ICASSP40776.2020.9053130.
+
+- **Review paper / broader context for MTR:**
+  - P. Wang et al., “A comprehensive review on motion trajectory reconstruction for EEG-based brain-computer interface,” *Frontiers in Neuroscience*, 2023. doi: 10.3389/fnins.2023.1086472.
+
+---
+
+## Citation / contact
+
+If you use this code, please cite our paper / report (add citation details here once finalized).
+
+- Hussam Asskar – hussam.asskar@uni-rostock.de.com
+- Moh’d Khier Al Kfari – mohd.kfari@uni-rostock.de.com
+
+---
+
+## Acknowledgements
+
+- WAY-EEG-GAL dataset authors/maintainers
+- MNE-Python community
+- Pix2Pix (Isola et al.) and related signal-to-signal translation inspirations
