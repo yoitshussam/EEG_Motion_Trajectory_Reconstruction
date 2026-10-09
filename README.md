@@ -1,7 +1,10 @@
-# Motion Trajectory Reconstruction from EEG
+# Motion Trajectory Reconstruction from EEG Signals
 
 This repository contains the code accompanying our work on **decoding continuous movement trajectories from non-invasive EEG** using deep learning.
 [Our Report](./Motion_Trajectory_Reconstruction.pdf)
+
+<img width="1203" height="987" alt="eeg" src="https://github.com/user-attachments/assets/eac89cfa-168b-4efd-bd80-f850b867c0e0" />
+
 
 We implement and compare three architectures for **EEG → 3D kinematics** regression / translation:
 
