@@ -172,10 +172,10 @@ The following are key references behind the approaches used in this repo:
 
 ## Citation / contact
 
-If you use this code, please cite our paper / report (add citation details here once finalized).
+If you use this code, please cite our report.
 
-- Hussam Asskar – hussam.asskar@uni-rostock.de.com
-- Moh’d Khier Al Kfari – mohd.kfari@uni-rostock.de.com
+- Hussam Asskar – hussamaskar12@gmail.com
+- Moh’d Khier Al Kfari – mohd.kfari@uni-rostock.de
 
 ---
 
