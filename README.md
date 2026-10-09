@@ -1,6 +1,7 @@
 # Motion Trajectory Reconstruction from EEG
 
 This repository contains the code accompanying our work on **decoding continuous movement trajectories from non-invasive EEG** using deep learning.
+[Our Report](./Motion_Trajectory_Reconstruction.pdf)
 
 We implement and compare three architectures for **EEG → 3D kinematics** regression / translation:
 
@@ -28,7 +29,14 @@ This project explores whether deep learning models can learn a mapping from EEG 
 ## Key findings
 
 - On **WAY-EEG-GAL**, all models can reconstruct motion trajectories well; the cGAN performs slightly better overall (often **PCC > 0.70**).
+  
+![CNNLSTM](CNNLSTM.png)
+![GAN](GAN.png)
+
 - On **unconstrained locomotion**, performance drops substantially (**PCC < 0.45** on average), likely due to motion artifacts + increased degrees of freedom.
+
+<img width="9000" height="5400" alt="subject_8_kinematics_results" src="https://github.com/user-attachments/assets/e7af4cfe-a70d-4d81-82b9-36a041129f47" />
+
 
 ---
 
